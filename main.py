@@ -115,8 +115,8 @@ _HTML = """<!DOCTYPE html>
         <option value="docx">Solo DOCX</option>
       </select>
 
-      <label for="max_pages">Pagine da elaborare (OCR)</label>
-      <input type="number" id="max_pages" name="max_pages" value="3" min="0" max="999">
+      <label>Intervallo pagine da elaborare (OCR)</label>
+      <div style="display:flex;gap:10px"><div style="flex:1"><label style="font-weight:normal;font-size:0.85rem">Da pagina</label><input type="number" id="page_from" value="1" min="1" max="999" style="margin-bottom:0"></div><div style="flex:1"><label style="font-weight:normal;font-size:0.85rem">A pagina (0=fine)</label><input type="number" id="page_to" value="3" min="0" max="999" style="margin-bottom:0"></div></div>
       <p class="hint">0 = tutte le pagine &nbsp;|&nbsp; Consigliato su Render: 3–5 pagine per evitare timeout</p>
 
       <button type="submit" id="btn">Converti PDF</button>
