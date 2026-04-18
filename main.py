@@ -101,12 +101,12 @@ _HTML = """<!DOCTYPE html>
 
     <form id="form">
       <label>File PDF</label>
-      <div class="drop-zone" id="drop">
+      <label for="file" class="drop-zone" id="drop">
         <div class="icon">📁</div>
         <div id="drop-label">Clicca o trascina un PDF qui</div>
       </div>
+      </label>
       <input type="file" id="file" accept=".pdf" style="display:none" onchange="updateLabel(this)">
-
       <label for="output">Formato output</label>
       <select id="output" name="output">
         <option value="all">Tutto (Markdown + JSON + DOCX)</option>
