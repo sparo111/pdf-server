@@ -211,6 +211,9 @@ async def root():
 # ── Endpoint health ───────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
+    import shutil, os
+    tess = shutil.which("tesseract") or next((p for p in ["/usr/bin/tesseract","/usr/local/bin/tesseract"] if os.path.isfile(p)), "NOT FOUND")
+    return {"status": "ok", "version": "1.0", "tesseract": tess}
     return {"status": "ok", "version": "1.0"}
 
 
