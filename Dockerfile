@@ -1,5 +1,6 @@
 FROM python:3.11-slim
 
+# Installa Tesseract e lingua italiana
 RUN apt-get update && apt-get install -y \
     tesseract-ocr \
     tesseract-ocr-ita \
@@ -13,9 +14,6 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-ARG CACHEBUST=1
 COPY . .
 
-EXPOSE 10000
-ENV PORT=10000
 CMD uvicorn main:app --host 0.0.0.0 --port $PORT
