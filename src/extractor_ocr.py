@@ -132,16 +132,16 @@ def _try_tesseract(pdf_path: Path, max_pages: int | None = None) -> ExtractionRe
             for page_idx, page in pages_to_process:
                 with tempfile.TemporaryDirectory() as tmp:
                     img_path = Path(tmp) / "page.png"
-                    # 300 DPI + contrast per scansioni
-                    pix = page.get_pixmap(dpi=300)
+                    # 200 DPI — bilanciamento qualità/velocità (era 300 DPI, troppo lento su Render Free)
+                    pix = page.get_pixmap(dpi=200)
                     img = Image.open(io.BytesIO(pix.tobytes("png"))).convert("L")
-                    img = ImageEnhance.Contrast(img).enhance(2.0)
+                    # Niente contrast enhance — Tesseract funziona bene su documenti GdF senza preprocessing
                     img.save(str(img_path))
 
                     out_base = Path(tmp) / "out"
                     subprocess.run(
                         [tess, str(img_path), str(out_base),
-                         "-l", "ita+eng", "--psm", "3", "--oem", "3"],
+                         "-l", "ita+eng", "--psm", "6", "--oem", "3"],
                         check=True, capture_output=True
                     )
                     txt_path = out_base.with_suffix(".txt")
@@ -157,7 +157,7 @@ def _try_tesseract(pdf_path: Path, max_pages: int | None = None) -> ExtractionRe
         return ExtractionResult(
             markdown="\n".join(md_pages).strip(),
             elements=elements,
-            page_count=page_count,
+            page_count=len(pages_to_process),
             engine="tesseract",
         )
 

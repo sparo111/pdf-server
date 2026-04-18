@@ -64,18 +64,24 @@ _HTML = """<!DOCTYPE html>
     .drop-zone:hover { background: #e8f0fe; }
     .drop-zone input { display: none; }
     .drop-zone .icon { font-size: 2.5rem; margin-bottom: 8px; }
-    select, button { width: 100%; padding: 12px; border-radius: 8px;
+    select, button, input[type=number] { width: 100%; padding: 12px; border-radius: 8px;
                      font-size: 1rem; margin-bottom: 12px; }
-    select { border: 1px solid #ccc; color: #333; }
+    select, input[type=number] { border: 1px solid #ccc; color: #333; }
+    input[type=number] { -moz-appearance: textfield; }
+    .hint { font-size: 0.82rem; color: #888; margin-top: -8px; margin-bottom: 14px; }
     button { background: #1F497D; color: white; border: none;
              cursor: pointer; font-weight: bold; transition: background 0.2s; }
     button:hover { background: #163a63; }
     button:disabled { background: #aaa; cursor: not-allowed; }
-    #status { margin-top: 16px; padding: 12px; border-radius: 8px;
-              display: none; font-size: 0.95rem; }
-    .info  { background: #e3f2fd; color: #1565c0; }
-    .ok    { background: #e8f5e9; color: #2e7d32; }
-    .error { background: #ffebee; color: #c62828; }
+    #status { margin-top: 16px; padding: 14px; border-radius: 8px;
+              display: none; font-size: 0.95rem; line-height: 1.6; }
+    .info    { background: #e3f2fd; color: #1565c0; }
+    .ok      { background: #e8f5e9; color: #2e7d32; }
+    .error   { background: #ffebee; color: #c62828; }
+    .warning { background: #fff8e1; color: #e65100; }
+    #timer { font-size: 0.85rem; margin-top: 6px; color: #555; }
+    #progress-bar-wrap { background: #dde6f0; border-radius: 4px; height: 6px; margin-top: 10px; overflow: hidden; display: none; }
+    #progress-bar { height: 6px; background: #1F497D; border-radius: 4px; width: 0%; transition: width 0.5s; }
     #result-links { margin-top: 16px; }
     #result-links a { display: inline-block; margin: 4px 8px 4px 0;
                       padding: 8px 16px; background: #1F497D; color: white;
@@ -109,19 +115,16 @@ _HTML = """<!DOCTYPE html>
         <option value="docx">Solo DOCX</option>
       </select>
 
-      <label for="max_pages">Limite pagine OCR (0 = tutte)</label>
-      <select id="max_pages" name="max_pages">
-        <option value="0">Tutte le pagine</option>
-        <option value="1">Max 1 pagina</option>
-        <option value="3" selected>Max 3 pagine (consigliato su Render)</option>
-        <option value="5">Max 5 pagine</option>
-        <option value="10">Max 10 pagine</option>
-      </select>
+      <label for="max_pages">Pagine da elaborare (OCR)</label>
+      <input type="number" id="max_pages" name="max_pages" value="3" min="0" max="999">
+      <p class="hint">0 = tutte le pagine &nbsp;|&nbsp; Consigliato su Render: 3–5 pagine per evitare timeout</p>
 
       <button type="submit" id="btn">Converti PDF</button>
     </form>
 
     <div id="status"></div>
+    <div id="timer"></div>
+    <div id="progress-bar-wrap"><div id="progress-bar"></div></div>
     <div id="result-links"></div>
   </div>
 
@@ -144,10 +147,68 @@ _HTML = """<!DOCTYPE html>
       }
     });
 
+    let timerInterval = null;
+    let progressInterval = null;
+
+    function startTimer(maxPages) {
+      const timerEl = document.getElementById('timer');
+      const bar = document.getElementById('progress-bar');
+      const barWrap = document.getElementById('progress-bar-wrap');
+      const start = Date.now();
+      // Stima: ~3 min per pagina su Render Free (con ottimizzazioni ~90 sec)
+      const estimatedMs = (maxPages > 0 ? maxPages : 5) * 90000;
+
+      barWrap.style.display = 'block';
+      bar.style.width = '0%';
+
+      const msgs = [
+        '⏳ Caricamento PDF sul server...',
+        '🔍 Analisi tipo documento...',
+        '🖼️ Conversione pagine in immagini...',
+        '🔤 OCR in corso — lettura testo...',
+        '📝 Quasi pronto, finalizzazione...',
+        '⚠️ Ci vuole un po\' con file grandi, attendi...',
+      ];
+
+      timerInterval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - start) / 1000);
+        const mins = Math.floor(elapsed / 60);
+        const secs = elapsed % 60;
+        const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+        const msgIdx = Math.min(Math.floor(elapsed / 25), msgs.length - 1);
+        timerEl.textContent = `${msgs[msgIdx]} — Tempo trascorso: ${timeStr}`;
+
+        // Barra avanzamento simulata
+        const pct = Math.min((Date.now() - start) / estimatedMs * 95, 95);
+        bar.style.width = pct + '%';
+
+        // Avviso blocco dopo 5 minuti
+        if (elapsed === 300) {
+          showStatus('⚠️ Il server sta impiegando molto tempo. Se non risponde entro altri 3 minuti, riprova con meno pagine.', 'warning');
+        }
+      }, 1000);
+    }
+
+    function stopTimer(success) {
+      if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+      const bar = document.getElementById('progress-bar');
+      const barWrap = document.getElementById('progress-bar-wrap');
+      const timerEl = document.getElementById('timer');
+      if (success) {
+        bar.style.width = '100%';
+        bar.style.background = '#2e7d32';
+        setTimeout(() => { barWrap.style.display = 'none'; timerEl.textContent = ''; }, 2000);
+      } else {
+        bar.style.background = '#c62828';
+        setTimeout(() => { barWrap.style.display = 'none'; timerEl.textContent = ''; }, 3000);
+      }
+    }
+
     document.getElementById('form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const file = document.getElementById('file').files[0];
       const output = document.getElementById('output').value;
+      const maxPagesVal = parseInt(document.getElementById('max_pages').value) || 0;
       const status = document.getElementById('status');
       const links  = document.getElementById('result-links');
       const btn    = document.getElementById('btn');
@@ -157,22 +218,30 @@ _HTML = """<!DOCTYPE html>
       btn.disabled = true;
       btn.textContent = 'Elaborazione in corso...';
       links.innerHTML = '';
-      showStatus('Caricamento e analisi PDF...', 'info');
+      showStatus('Caricamento PDF...', 'info');
+      startTimer(maxPagesVal);
 
       const fd = new FormData();
       fd.append('file', file);
       fd.append('output', output);
-      fd.append('max_pages', document.getElementById('max_pages').value);
+      fd.append('max_pages', maxPagesVal);
+
+      // Timeout 8 minuti
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 480000);
 
       try {
-        const res  = await fetch('/convert', { method: 'POST', body: fd });
+        const res  = await fetch('/convert', { method: 'POST', body: fd, signal: controller.signal });
+        clearTimeout(timeout);
         const data = await res.json();
 
         if (!res.ok) {
-          showStatus('Errore: ' + (data.detail || 'problema sconosciuto'), 'error');
+          stopTimer(false);
+          showStatus('❌ Errore: ' + (data.detail || 'problema sconosciuto'), 'error');
           return;
         }
 
+        stopTimer(true);
         const typeLabels = {
           TESTO: ['testo','badge-testo'],
           SCANSIONE: ['scansione','badge-scan'],
@@ -180,9 +249,12 @@ _HTML = """<!DOCTYPE html>
           MISTO: ['misto','badge-testo'],
         };
         const [tl, tc] = typeLabels[data.pdf_type] || ['sconosciuto','badge-testo'];
+        const pagesLabel = data.pages_processed
+          ? `${data.pages_processed} di ${data.total_pages} pagine elaborate`
+          : `${data.page_count} pagine`;
         showStatus(
           `✅ Conversione completata — motore: <b>${data.engine}</b> ` +
-          `<span class="badge ${tc}">${tl}</span> — ${data.page_count} pagine`,
+          `<span class="badge ${tc}">${tl}</span> — ${pagesLabel}`,
           'ok'
         );
 
@@ -194,7 +266,13 @@ _HTML = """<!DOCTYPE html>
         links.innerHTML = html;
 
       } catch (err) {
-        showStatus('Errore di rete: ' + err.message, 'error');
+        stopTimer(false);
+        clearTimeout(timeout);
+        if (err.name === 'AbortError') {
+          showStatus('⏰ Timeout: il server ha impiegato troppo tempo (oltre 8 minuti).<br>Riprova con un numero di pagine inferiore.', 'error');
+        } else {
+          showStatus('❌ Errore di rete: ' + err.message + '<br>Controlla che il server sia attivo e riprova.', 'error');
+        }
       } finally {
         btn.disabled = false;
         btn.textContent = 'Converti PDF';
@@ -345,13 +423,25 @@ async def convert(
     if extraction.error:
         logger.warning("Estrazione con errore: %s", extraction.error)
 
+    # Conteggio pagine reali del PDF
+    try:
+        import fitz as _fitz
+        with _fitz.open(str(pdf_path)) as _doc:
+            total_pages = _doc.page_count
+    except Exception:
+        total_pages = extraction.page_count
+
+    pages_processed = extraction.page_count if extraction.page_count <= total_pages else total_pages
+
     # Costruzione risposta
     response: dict = {
-        "pdf_type":   pdf_type.value,
-        "engine":     extraction.engine,
-        "page_count": extraction.page_count,
-        "filename":   file.filename,
-        "error":      extraction.error or None,
+        "pdf_type":        pdf_type.value,
+        "engine":          extraction.engine,
+        "page_count":      pages_processed,
+        "pages_processed": pages_processed,
+        "total_pages":     total_pages,
+        "filename":        file.filename,
+        "error":           extraction.error or None,
     }
 
     # ── Markdown ──────────────────────────────────────────────────────────────
