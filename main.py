@@ -109,6 +109,15 @@ _HTML = """<!DOCTYPE html>
         <option value="docx">Solo DOCX</option>
       </select>
 
+      <label for="max_pages">Limite pagine OCR (0 = tutte)</label>
+      <select id="max_pages" name="max_pages">
+        <option value="0">Tutte le pagine</option>
+        <option value="1">Max 1 pagina</option>
+        <option value="3" selected>Max 3 pagine (consigliato su Render)</option>
+        <option value="5">Max 5 pagine</option>
+        <option value="10">Max 10 pagine</option>
+      </select>
+
       <button type="submit" id="btn">Converti PDF</button>
     </form>
 
@@ -153,6 +162,7 @@ _HTML = """<!DOCTYPE html>
       const fd = new FormData();
       fd.append('file', file);
       fd.append('output', output);
+      fd.append('max_pages', document.getElementById('max_pages').value);
 
       try {
         const res  = await fetch('/convert', { method: 'POST', body: fd });
@@ -211,9 +221,6 @@ async def root():
 # ── Endpoint health ───────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
-    import shutil, os
-    tess = shutil.which("tesseract") or next((p for p in ["/usr/bin/tesseract","/usr/local/bin/tesseract"] if os.path.isfile(p)), "NOT FOUND")
-    return {"status": "ok", "version": "1.0", "tesseract": tess}
     return {"status": "ok", "version": "1.0"}
 
 
@@ -222,6 +229,7 @@ async def health():
 async def convert(
     file: UploadFile = File(..., description="File PDF da convertire"),
     output: str = Form("all", description="Formato: all | markdown | json | docx"),
+    max_pages: int = Form(0, description="Limite pagine OCR. 0 = tutte le pagine."),
 ):
     """
     Carica un PDF e ricevi Markdown, JSON strutturato e/o DOCX.
@@ -328,7 +336,8 @@ async def convert(
             extraction.pdf_type = pdf_type.value
     else:
         # SCANSIONE → OCR
-        extraction = extract_ocr(pdf_path)
+        _max = max_pages if max_pages and max_pages > 0 else None
+        extraction = extract_ocr(pdf_path, max_pages=_max)
         extraction.pdf_type = pdf_type.value
 
     extraction.page_count = extraction.page_count or 1
