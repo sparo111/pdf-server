@@ -101,12 +101,11 @@ _HTML = """<!DOCTYPE html>
 
     <form id="form">
       <label>File PDF</label>
-      <div class="drop-zone" id="drop" onclick="document.getElementById('file').click()">
+      <div class="drop-zone" id="drop">
         <div class="icon">📁</div>
         <div id="drop-label">Clicca o trascina un PDF qui</div>
-        <input type="file" id="file" accept=".pdf" onchange="updateLabel(this)">
       </div>
-
+      <input type="file" id="file" accept=".pdf" style="display:none">
       <label for="output">Formato output</label>
       <select id="output" name="output">
         <option value="all">Tutto (Markdown + JSON + DOCX)</option>
@@ -133,6 +132,9 @@ _HTML = """<!DOCTYPE html>
       const label = document.getElementById('drop-label');
       label.textContent = input.files[0] ? '✅ ' + input.files[0].name : 'Clicca o trascina un PDF qui';
     }
+
+    document.getElementById('drop').addEventListener('click', function() { document.getElementById('file').click(); });
+    document.getElementById('file').addEventListener('change', function() { updateLabel(this); });
 
     // Drag & drop
     const drop = document.getElementById('drop');
