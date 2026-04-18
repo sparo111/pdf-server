@@ -1,5 +1,0 @@
-# Dipendenze opzionali per OCR avanzato con docling
-# Installa con: pip install -r requirements-ocr.txt
-# ATTENZIONE: download di circa 2 GB di modelli AI al primo avvio
-
-docling[easyocr]>=2.88.0
