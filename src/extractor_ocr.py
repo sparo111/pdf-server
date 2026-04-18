@@ -124,10 +124,8 @@ def _try_tesseract(pdf_path: Path) -> ExtractionResult | None:
                 with tempfile.TemporaryDirectory() as tmp:
                     img_path = Path(tmp) / "page.png"
                     # 300 DPI + contrast per scansioni
-                    pix = page.get_pixmap(dpi=300)
-                    img = Image.open(io.BytesIO(pix.tobytes("png"))).convert("L")
-                    img = ImageEnhance.Contrast(img).enhance(2.0)
-                    img.save(str(img_path))
+                    pix = page.get_pixmap(dpi=200)
+                    pix.save(str(img_path))
 
                     out_base = Path(tmp) / "out"
                     subprocess.run(
