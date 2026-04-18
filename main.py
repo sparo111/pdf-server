@@ -105,7 +105,8 @@ _HTML = """<!DOCTYPE html>
         <div class="icon">📁</div>
         <div id="drop-label">Clicca o trascina un PDF qui</div>
       </div>
-      <input type="file" id="file" accept=".pdf" style="display:none">
+      <input type="file" id="file" accept=".pdf" style="display:none" onchange="updateLabel(this)">
+
       <label for="output">Formato output</label>
       <select id="output" name="output">
         <option value="all">Tutto (Markdown + JSON + DOCX)</option>
@@ -115,8 +116,17 @@ _HTML = """<!DOCTYPE html>
       </select>
 
       <label>Intervallo pagine da elaborare (OCR)</label>
-      <div style="display:flex;gap:10px"><div style="flex:1"><label style="font-weight:normal;font-size:0.85rem">Da pagina</label><input type="number" id="page_from" value="1" min="1" max="999" style="margin-bottom:0"></div><div style="flex:1"><label style="font-weight:normal;font-size:0.85rem">A pagina (0=fine)</label><input type="number" id="page_to" value="3" min="0" max="999" style="margin-bottom:0"></div></div>
-      <p class="hint">0 = tutte le pagine &nbsp;|&nbsp; Consigliato su Render: 3–5 pagine per evitare timeout</p>
+      <div style="display:flex; gap:10px; margin-bottom:6px;">
+        <div style="flex:1">
+          <label for="page_from" style="font-weight:normal; font-size:0.85rem; color:#555;">Da pagina</label>
+          <input type="number" id="page_from" value="1" min="1" max="999" style="margin-bottom:0">
+        </div>
+        <div style="flex:1">
+          <label for="page_to" style="font-weight:normal; font-size:0.85rem; color:#555;">A pagina (0 = fino alla fine)</label>
+          <input type="number" id="page_to" value="3" min="0" max="999" style="margin-bottom:0">
+        </div>
+      </div>
+      <p class="hint">Es: da 1 a 3, poi da 4 a 6, ecc. &nbsp;|&nbsp; Consigliato su Render: blocchi di 3 pagine</p>
 
       <button type="submit" id="btn">Converti PDF</button>
     </form>
@@ -133,8 +143,10 @@ _HTML = """<!DOCTYPE html>
       label.textContent = input.files[0] ? '✅ ' + input.files[0].name : 'Clicca o trascina un PDF qui';
     }
 
-    document.getElementById('drop').addEventListener('click', function() { document.getElementById('file').click(); });
-    document.getElementById('file').addEventListener('change', function() { updateLabel(this); });
+    // Click sulla drop zone apre il selettore file
+    document.getElementById('drop').addEventListener('click', function() {
+      document.getElementById('file').click();
+    });
 
     // Drag & drop
     const drop = document.getElementById('drop');
@@ -142,10 +154,15 @@ _HTML = """<!DOCTYPE html>
     drop.addEventListener('dragleave', () => { drop.style.background = ''; });
     drop.addEventListener('drop', e => {
       e.preventDefault(); drop.style.background = '';
-      const file = e.dataTransfer.files[0];
-      if (file && file.name.endsWith('.pdf')) {
-        document.getElementById('file').files = e.dataTransfer.files;
+      const f = e.dataTransfer.files[0];
+      if (f && f.name.toLowerCase().endsWith('.pdf')) {
+        // Assegna il file all'input tramite DataTransfer
+        const dt = new DataTransfer();
+        dt.items.add(f);
+        document.getElementById('file').files = dt.files;
         updateLabel(document.getElementById('file'));
+      } else {
+        showStatus('⚠️ Trascina un file PDF valido', 'warning');
       }
     });
 
@@ -210,12 +227,15 @@ _HTML = """<!DOCTYPE html>
       e.preventDefault();
       const file = document.getElementById('file').files[0];
       const output = document.getElementById('output').value;
-      const maxPagesVal = parseInt(document.getElementById('max_pages').value) || 0;
+      const pageFrom = Math.max(1, parseInt(document.getElementById('page_from').value) || 1);
+      const pageTo   = parseInt(document.getElementById('page_to').value) || 0;
+      const maxPagesVal = pageTo === 0 ? 0 : pageTo; // 0 = tutte
       const status = document.getElementById('status');
       const links  = document.getElementById('result-links');
       const btn    = document.getElementById('btn');
 
-      if (!file) { showStatus('Seleziona un file PDF', 'error'); return; }
+      if (!file) { showStatus('⚠️ Seleziona un file PDF', 'error'); return; }
+      if (pageTo > 0 && pageTo < pageFrom) { showStatus('⚠️ "A pagina" deve essere ≥ "Da pagina"', 'error'); return; }
 
       btn.disabled = true;
       btn.textContent = 'Elaborazione in corso...';
@@ -226,7 +246,8 @@ _HTML = """<!DOCTYPE html>
       const fd = new FormData();
       fd.append('file', file);
       fd.append('output', output);
-      fd.append('max_pages', maxPagesVal);
+      fd.append('page_from', pageFrom);
+      fd.append('page_to', pageTo);
 
       // Timeout 8 minuti
       const controller = new AbortController();
@@ -309,7 +330,8 @@ async def health():
 async def convert(
     file: UploadFile = File(..., description="File PDF da convertire"),
     output: str = Form("all", description="Formato: all | markdown | json | docx"),
-    max_pages: int = Form(0, description="Limite pagine OCR. 0 = tutte le pagine."),
+    page_from: int = Form(1, description="Pagina iniziale (1 = prima pagina)"),
+    page_to: int = Form(0, description="Pagina finale (0 = fino alla fine)"),
 ):
     """
     Carica un PDF e ricevi Markdown, JSON strutturato e/o DOCX.
@@ -416,8 +438,9 @@ async def convert(
             extraction.pdf_type = pdf_type.value
     else:
         # SCANSIONE → OCR
-        _max = max_pages if max_pages and max_pages > 0 else None
-        extraction = extract_ocr(pdf_path, max_pages=_max)
+        _from = max(0, page_from - 1)          # converti in indice 0-based
+        _to   = page_to if page_to > 0 else None
+        extraction = extract_ocr(pdf_path, page_from=_from, page_to=_to)
         extraction.pdf_type = pdf_type.value
 
     extraction.page_count = extraction.page_count or 1
