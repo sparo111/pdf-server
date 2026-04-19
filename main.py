@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 TEMP_DIR = Path(os.getenv("PDF_SERVER_TEMP_DIR", tempfile.gettempdir())) / "pdf_server"
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", str(50 * 1024 * 1024)))
-OCR_TIMEOUT = float(os.getenv("OCR_TIMEOUT", "300"))
+OCR_TIMEOUT = float(os.getenv("OCR_TIMEOUT", "600"))
 
 app = FastAPI(title="PDF Server ibrido", version="3.0")
 
