@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="PDF Server ibrido",
     description="Converte PDF in Markdown, JSON strutturato e DOCX.",
-    version="1.0",
+    version="1.1",
 )
 
 TEMP_DIR = Path(tempfile.gettempdir()) / "pdf_server"
