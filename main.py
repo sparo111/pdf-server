@@ -261,7 +261,7 @@ _HTML = """<!DOCTYPE html>
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def root():
-    return HTMLResponse(_HTML)
+    return HTMLResponse(content=_HTML.encode("utf-8", errors="replace").decode("utf-8"), media_type="text/html; charset=utf-8")
 
 
 @app.get("/health")
