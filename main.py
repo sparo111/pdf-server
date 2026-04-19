@@ -23,9 +23,9 @@ logger = logging.getLogger(__name__)
 TEMP_DIR = Path(os.getenv("PDF_SERVER_TEMP_DIR", tempfile.gettempdir())) / "pdf_server"
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", str(50 * 1024 * 1024)))
-OCR_TIMEOUT = float(os.getenv("OCR_TIMEOUT", "600"))
+OCR_TIMEOUT = float(os.getenv("OCR_TIMEOUT", "300"))
 
-app = FastAPI(title="PDF Server ibrido", version="3.0")
+app = FastAPI(title="PDF Server ibrido", version="3.1-hybrid")
 
 _HTML = """<!DOCTYPE html>
 <html lang="it">
@@ -457,7 +457,7 @@ async def convert(
             _to = page_to
             try:
                 extraction = await asyncio.wait_for(
-                    asyncio.to_thread(extract_ocr, pdf_path, _from, _to),
+                    asyncio.to_thread(extract_ocr, pdf_path, _from, _to, 200, "4"),
                     timeout=OCR_TIMEOUT
                 )
             except asyncio.TimeoutError:
