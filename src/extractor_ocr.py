@@ -101,10 +101,11 @@ def _find_tess() -> str | None:
     return None
 
 
-def _try_tesseract(pdf_path: Path, max_pages: int | None = None) -> ExtractionResult | None:
-    """Prova OCR con Tesseract. Cerca anche nei percorsi comuni Windows.
-    
-    max_pages: se impostato, elabora solo le prime N pagine.
+def _try_tesseract(pdf_path: Path, page_from: int = 0, page_to: int | None = None) -> ExtractionResult | None:
+    """Prova OCR con Tesseract.
+
+    page_from: indice 0-based della prima pagina (default 0)
+    page_to:   indice 1-based dell'ultima pagina (default None = fino alla fine)
     """
     tess = _find_tess()
     if not tess:
@@ -118,24 +119,23 @@ def _try_tesseract(pdf_path: Path, max_pages: int | None = None) -> ExtractionRe
         return None
 
     try:
-        logger.info("OCR Tesseract su %s (max_pages=%s)", pdf_path.name, max_pages)
+        logger.info("OCR Tesseract su %s (pagine %s→%s)", pdf_path.name, page_from + 1, page_to or "fine")
         md_pages: list[str] = []
         elements: list[Element] = []
 
-        from PIL import Image, ImageEnhance
+        from PIL import Image
         with fitz.open(str(pdf_path)) as doc:
             page_count = doc.page_count
-            pages_to_process = list(enumerate(doc))
-            if max_pages is not None and max_pages > 0:
-                pages_to_process = pages_to_process[:max_pages]
-                logger.info("Limite pagine attivo: elaboro %d/%d pagine", len(pages_to_process), page_count)
+            end = min(page_to, page_count) if page_to else page_count
+            pages_to_process = list(enumerate(doc))[page_from:end]
+            logger.info("Elaboro %d pagine (da %d a %d di %d totali)", len(pages_to_process), page_from + 1, end, page_count)
+
             for page_idx, page in pages_to_process:
                 with tempfile.TemporaryDirectory() as tmp:
                     img_path = Path(tmp) / "page.png"
-                    # 200 DPI — bilanciamento qualità/velocità (era 300 DPI, troppo lento su Render Free)
+                    # 200 DPI — bilanciamento qualità/velocità
                     pix = page.get_pixmap(dpi=200)
                     img = Image.open(io.BytesIO(pix.tobytes("png"))).convert("L")
-                    # Niente contrast enhance — Tesseract funziona bene su documenti GdF senza preprocessing
                     img.save(str(img_path))
 
                     out_base = Path(tmp) / "out"
@@ -166,26 +166,28 @@ def _try_tesseract(pdf_path: Path, max_pages: int | None = None) -> ExtractionRe
         return None
 
 
-def extract_ocr(pdf_path: Path, max_pages: int | None = None) -> ExtractionResult:
+def extract_ocr(pdf_path: Path, page_from: int = 0, page_to: int | None = None) -> ExtractionResult:
     """
     Estrazione OCR con fallback automatico:
-      1. docling (se installato)
+      1. docling (se installato, solo se elabora tutto il documento)
       2. Tesseract (se nel PATH)
       3. PyMuPDF grezzo (sempre disponibile)
 
-    max_pages: se impostato, elabora solo le prime N pagine (utile per evitare timeout su Render Free).
+    page_from: indice 0-based della prima pagina (default 0)
+    page_to:   indice 1-based dell'ultima pagina (default None = tutte)
     """
-    # Tentativo 1: docling
-    result = _try_docling(pdf_path)
-    if result and not result.error:
-        return result
+    # Tentativo 1: docling (solo se nessun intervallo specificato)
+    if page_from == 0 and page_to is None:
+        result = _try_docling(pdf_path)
+        if result and not result.error:
+            return result
 
     # Tentativo 2: Tesseract
-    result = _try_tesseract(pdf_path, max_pages=max_pages)
+    result = _try_tesseract(pdf_path, page_from=page_from, page_to=page_to)
     if result and not result.error:
         return result
 
-    # Fallback finale: PyMuPDF grezzo (restituisce quello che riesce a leggere)
+    # Fallback finale: PyMuPDF grezzo
     logger.warning(
         "Nessun motore OCR disponibile per %s — uso PyMuPDF grezzo",
         pdf_path.name

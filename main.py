@@ -1,7 +1,4 @@
-"""
-PDF Server ibrido - FastAPI v2.2
-Converte PDF in Markdown, JSON strutturato e DOCX scaricabile.
-"""
+"""PDF Server ibrido - FastAPI v3.0"""
 from __future__ import annotations
 
 import asyncio
@@ -19,26 +16,17 @@ import fitz
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
-# ---------------------------------------------------------------------------
-# Configurazione
-# ---------------------------------------------------------------------------
-logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO"),
-    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
-)
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"),
+                    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 TEMP_DIR = Path(os.getenv("PDF_SERVER_TEMP_DIR", tempfile.gettempdir())) / "pdf_server"
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
+MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", str(50 * 1024 * 1024)))
+OCR_TIMEOUT = float(os.getenv("OCR_TIMEOUT", "300"))
 
-MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", str(50 * 1024 * 1024)))  # 50 MB default
-OCR_TIMEOUT = float(os.getenv("OCR_TIMEOUT", "300"))  # 5 minuti default
+app = FastAPI(title="PDF Server ibrido", version="3.0")
 
-app = FastAPI(title="PDF Server ibrido", version="2.2")
-
-# ---------------------------------------------------------------------------
-# HTML frontend
-# ---------------------------------------------------------------------------
 _HTML = """<!DOCTYPE html>
 <html lang="it">
 <head>
@@ -53,10 +41,10 @@ _HTML = """<!DOCTYPE html>
             max-width: 600px; width: 100%; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
     h1 { color: #1F497D; margin-bottom: 8px; font-size: 1.6rem; }
     .subtitle { color: #666; margin-bottom: 32px; font-size: 0.95rem; }
-    .lbl { display: block; font-weight: bold; color: #333; margin-bottom: 6px; }
+    .lbl { display: block; font-weight: bold; color: #333; margin-bottom: 6px; margin-top: 12px; }
     .drop-zone { border: 2px dashed #1F497D; border-radius: 8px; padding: 40px;
                  text-align: center; cursor: pointer; color: #1F497D;
-                 transition: background 0.2s; margin-bottom: 20px; display: block; }
+                 transition: background 0.2s; margin-bottom: 8px; display: block; }
     .drop-zone:hover { background: #e8f0fe; }
     .icon { font-size: 2.5rem; margin-bottom: 8px; }
     select, button, input[type=number] { width: 100%; padding: 12px; border-radius: 8px;
@@ -67,8 +55,8 @@ _HTML = """<!DOCTYPE html>
     .row label { display: block; font-size: 0.85rem; color: #555; margin-bottom: 4px; }
     .row input { margin-bottom: 0; }
     .hint { font-size: 0.82rem; color: #888; margin-bottom: 14px; }
-    button { background: #1F497D; color: white; border: none;
-             cursor: pointer; font-weight: bold; transition: background 0.2s; margin-top: 8px; }
+    button { background: #1F497D; color: white; border: none; cursor: pointer;
+             font-weight: bold; transition: background 0.2s; margin-top: 8px; }
     button:hover { background: #163a63; }
     button:disabled { background: #aaa; cursor: not-allowed; }
     #status { margin-top: 16px; padding: 14px; border-radius: 8px;
@@ -78,20 +66,19 @@ _HTML = """<!DOCTYPE html>
     .error   { background: #ffebee; color: #c62828; }
     .warning { background: #fff8e1; color: #e65100; }
     #timer { font-size: 0.85rem; margin-top: 6px; color: #555; }
-    #progress-bar-wrap { background: #dde6f0; border-radius: 4px; height: 6px;
-                         margin-top: 10px; overflow: hidden; display: none; }
-    #progress-bar { height: 6px; background: #1F497D; border-radius: 4px;
-                    width: 0%; transition: width 0.5s; }
-    #result-links { margin-top: 16px; }
-    #result-links a { display: inline-block; margin: 4px 8px 4px 0; padding: 8px 16px;
-                      background: #1F497D; color: white; border-radius: 6px;
-                      text-decoration: none; font-size: 0.9rem; }
-    #result-links a:hover { background: #163a63; }
+    #pbwrap { background: #dde6f0; border-radius: 4px; height: 6px;
+              margin-top: 10px; overflow: hidden; display: none; }
+    #pb { height: 6px; background: #1F497D; border-radius: 4px; width: 0%; transition: width 0.5s; }
+    #links { margin-top: 16px; }
+    #links a { display: inline-block; margin: 4px 8px 4px 0; padding: 8px 16px;
+               background: #1F497D; color: white; border-radius: 6px;
+               text-decoration: none; font-size: 0.9rem; }
+    #links a:hover { background: #163a63; }
     .badge { display: inline-block; padding: 2px 8px; border-radius: 12px;
              font-size: 0.8rem; font-weight: bold; margin-left: 8px; }
-    .badge-testo { background: #e8f5e9; color: #2e7d32; }
-    .badge-scan  { background: #fff3e0; color: #e65100; }
-    .badge-vett  { background: #e3f2fd; color: #1565c0; }
+    .bt { background: #e8f5e9; color: #2e7d32; }
+    .bs { background: #fff3e0; color: #e65100; }
+    .bv { background: #e3f2fd; color: #1565c0; }
   </style>
 </head>
 <body>
@@ -100,13 +87,13 @@ _HTML = """<!DOCTYPE html>
     <p class="subtitle">Carica un PDF - ricevi Markdown, JSON e DOCX</p>
 
     <span class="lbl">File PDF</span>
-    <label for="file" class="drop-zone" id="drop">
+    <label for="fileinput" class="drop-zone" id="dropzone">
       <div class="icon">&#128193;</div>
-      <div id="drop-label">Clicca o trascina un PDF qui</div>
+      <div id="filelabel">Clicca o trascina un PDF qui</div>
     </label>
-    <input type="file" id="file" accept=".pdf" style="display:none">
+    <input type="file" id="fileinput" accept=".pdf" style="display:none">
 
-    <form id="form">
+    <form id="mainform">
       <span class="lbl">Formato output</span>
       <select id="output">
         <option value="all">Tutto (Markdown + JSON + DOCX)</option>
@@ -115,179 +102,151 @@ _HTML = """<!DOCTYPE html>
         <option value="docx">Solo DOCX</option>
       </select>
 
-      <span class="lbl">Intervallo pagine da elaborare (OCR)</span>
+      <span class="lbl">Intervallo pagine (OCR)</span>
       <div class="row">
         <div>
-          <label for="page_from">Da pagina</label>
-          <input type="number" id="page_from" value="1" min="1" max="999">
+          <label for="pfrom">Da pagina</label>
+          <input type="number" id="pfrom" value="1" min="1" max="999">
         </div>
         <div>
-          <label for="page_to">A pagina (0 = fino alla fine)</label>
-          <input type="number" id="page_to" value="3" min="0" max="999">
+          <label for="pto">A pagina (0 = tutte)</label>
+          <input type="number" id="pto" value="3" min="0" max="999">
         </div>
       </div>
-      <p class="hint">Es: da 1 a 3, poi da 4 a 6, ecc. | Consigliato su Render: blocchi di 3 pagine</p>
-
+      <p class="hint">Es: da 1 a 3, poi da 4 a 6 | Consigliato su Render: blocchi di 3</p>
       <button type="submit" id="btn">Converti PDF</button>
     </form>
 
     <div id="status"></div>
     <div id="timer"></div>
-    <div id="progress-bar-wrap"><div id="progress-bar"></div></div>
-    <div id="result-links"></div>
+    <div id="pbwrap"><div id="pb"></div></div>
+    <div id="links"></div>
   </div>
 
   <script>
 (function() {
-  var fileInput = document.getElementById("file");
-  var dropLabel = document.getElementById("drop-label");
-  var drop = document.getElementById("drop");
-  var form = document.getElementById("form");
+  var fi = document.getElementById("fileinput");
+  var fl = document.getElementById("filelabel");
+  var dz = document.getElementById("dropzone");
+  var frm = document.getElementById("mainform");
   var btn = document.getElementById("btn");
-  var statusDiv = document.getElementById("status");
-  var timerDiv = document.getElementById("timer");
-  var progressBarWrap = document.getElementById("progress-bar-wrap");
-  var progressBar = document.getElementById("progress-bar");
-  var resultLinks = document.getElementById("result-links");
-  var timerInterval = null;
+  var st = document.getElementById("status");
+  var tm = document.getElementById("timer");
+  var pbw = document.getElementById("pbwrap");
+  var pb = document.getElementById("pb");
+  var lk = document.getElementById("links");
+  var ti = null;
 
-  fileInput.addEventListener("change", function() {
-    dropLabel.textContent = this.files && this.files[0] ? "Selezionato: " + this.files[0].name : "Clicca o trascina un PDF qui";
+  fi.addEventListener("change", function() {
+    fl.textContent = (this.files && this.files[0]) ? "Selezionato: " + this.files[0].name : "Clicca o trascina un PDF qui";
   });
 
-  drop.addEventListener("dragover", function(e) { e.preventDefault(); drop.style.background = "#e8f0fe"; });
-  drop.addEventListener("dragleave", function() { drop.style.background = ""; });
-  drop.addEventListener("drop", function(e) {
+  dz.addEventListener("dragover", function(e) { e.preventDefault(); dz.style.background = "#e8f0fe"; });
+  dz.addEventListener("dragleave", function() { dz.style.background = ""; });
+  dz.addEventListener("drop", function(e) {
     e.preventDefault();
-    drop.style.background = "";
+    dz.style.background = "";
     var f = e.dataTransfer.files[0];
     if (f && f.name.toLowerCase().indexOf(".pdf") !== -1) {
       var dt = new DataTransfer();
       dt.items.add(f);
-      fileInput.files = dt.files;
-      dropLabel.textContent = "Selezionato: " + f.name;
+      fi.files = dt.files;
+      fl.textContent = "Selezionato: " + f.name;
     } else {
-      showStatus("Trascina un file PDF valido", "warning");
+      showSt("Trascina un file PDF valido", "warning");
     }
   });
 
-  function startTimer(nPages) {
-    var start = Date.now();
-    var estimatedMs = (nPages > 0 ? nPages : 5) * 90000;
-    progressBarWrap.style.display = "block";
-    progressBar.style.width = "0%";
-    progressBar.style.background = "#1F497D";
+  function startTm(n) {
+    var s = Date.now();
+    var est = (n > 0 ? n : 5) * 90000;
+    pbw.style.display = "block";
+    pb.style.width = "0%";
+    pb.style.background = "#1F497D";
     var msgs = [
       "Caricamento PDF sul server...",
       "Analisi tipo documento...",
       "Conversione pagine in immagini...",
       "OCR in corso - lettura testo...",
-      "Quasi pronto, finalizzazione...",
+      "Quasi pronto...",
       "Elaborazione in corso, attendere..."
     ];
-    timerInterval = setInterval(function() {
-      var elapsed = Math.floor((Date.now() - start) / 1000);
-      var mins = Math.floor(elapsed / 60);
-      var secs = elapsed % 60;
-      var timeStr = mins > 0 ? mins + "m " + secs + "s" : secs + "s";
-      var msgIdx = Math.min(Math.floor(elapsed / 25), msgs.length - 1);
-      timerDiv.textContent = msgs[msgIdx] + " - Tempo: " + timeStr;
-      progressBar.style.width = Math.min((Date.now() - start) / estimatedMs * 95, 95) + "%";
-      if (elapsed === 300) {
-        showStatus("Il server sta impiegando molto. Riprova con meno pagine se non risponde.", "warning");
-      }
+    ti = setInterval(function() {
+      var el = Math.floor((Date.now() - s) / 1000);
+      var mn = Math.floor(el / 60);
+      var sc = el % 60;
+      var ts = mn > 0 ? mn + "m " + sc + "s" : sc + "s";
+      var mi = Math.min(Math.floor(el / 25), msgs.length - 1);
+      tm.textContent = msgs[mi] + " - Tempo: " + ts;
+      pb.style.width = Math.min((Date.now() - s) / est * 95, 95) + "%";
+      if (el === 300) { showSt("Il server sta impiegando molto. Riprova con meno pagine.", "warning"); }
     }, 1000);
   }
 
-  function stopTimer(ok) {
-    if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
-    progressBar.style.width = "100%";
-    progressBar.style.background = ok ? "#2e7d32" : "#c62828";
-    setTimeout(function() {
-      progressBarWrap.style.display = "none";
-      timerDiv.textContent = "";
-    }, 2000);
+  function stopTm(ok) {
+    if (ti) { clearInterval(ti); ti = null; }
+    pb.style.width = "100%";
+    pb.style.background = ok ? "#2e7d32" : "#c62828";
+    setTimeout(function() { pbw.style.display = "none"; tm.textContent = ""; }, 2000);
   }
 
-  function showStatus(msg, cls) {
-    statusDiv.innerHTML = msg;
-    statusDiv.className = cls;
-    statusDiv.style.display = "block";
+  function showSt(msg, cls) {
+    st.innerHTML = msg;
+    st.className = cls;
+    st.style.display = "block";
   }
 
-  form.addEventListener("submit", function(e) {
+  frm.addEventListener("submit", function(e) {
     e.preventDefault();
-    var file = fileInput.files[0];
-    var output = document.getElementById("output").value;
-    var pageFrom = Math.max(1, parseInt(document.getElementById("page_from").value) || 1);
-    var pageTo = parseInt(document.getElementById("page_to").value) || 0;
+    var file = fi.files[0];
+    var out = document.getElementById("output").value;
+    var pf = Math.max(1, parseInt(document.getElementById("pfrom").value) || 1);
+    var pt = parseInt(document.getElementById("pto").value) || 0;
 
-    if (!file) {
-      showStatus("Seleziona un file PDF prima di procedere", "error");
-      return;
-    }
-    if (pageTo > 0 && pageTo < pageFrom) {
-      showStatus("A pagina deve essere maggiore o uguale a Da pagina", "error");
-      return;
-    }
+    if (!file) { showSt("Seleziona un file PDF prima di procedere", "error"); return; }
+    if (pt > 0 && pt < pf) { showSt("A pagina deve essere maggiore o uguale a Da pagina", "error"); return; }
 
     btn.disabled = true;
     btn.textContent = "Elaborazione in corso...";
-    resultLinks.innerHTML = "";
-    showStatus("Caricamento PDF...", "info");
-    startTimer(pageTo > 0 ? pageTo - pageFrom + 1 : 5);
+    lk.innerHTML = "";
+    showSt("Caricamento PDF...", "info");
+    startTm(pt > 0 ? pt - pf + 1 : 5);
 
     var fd = new FormData();
     fd.append("file", file);
-    fd.append("output", output);
-    fd.append("page_from", pageFrom);
-    fd.append("page_to", pageTo);
+    fd.append("output", out);
+    fd.append("page_from", pf);
+    fd.append("page_to", pt);
 
-    var controller = new AbortController();
-    var timeout = setTimeout(function() { controller.abort(); }, 480000);
+    var ctrl = new AbortController();
+    var tmo = setTimeout(function() { ctrl.abort(); }, 480000);
 
-    fetch("/convert", { method: "POST", body: fd, signal: controller.signal })
+    fetch("/convert", { method: "POST", body: fd, signal: ctrl.signal })
       .then(function(res) {
-        clearTimeout(timeout);
-        return res.json().then(function(data) { return { ok: res.ok, data: data }; });
+        clearTimeout(tmo);
+        return res.json().then(function(d) { return { ok: res.ok, data: d }; });
       })
-      .then(function(result) {
-        if (!result.ok) {
-          stopTimer(false);
-          showStatus("Errore: " + (result.data.detail || "problema sconosciuto"), "error");
-          return;
-        }
-        stopTimer(true);
-        var data = result.data;
-        var typeLabels = {
-          TESTO: ["testo", "badge-testo"],
-          SCANSIONE: ["scansione", "badge-scan"],
-          VETT_RASTER: ["vettoriale-raster", "badge-vett"],
-          MISTO: ["misto", "badge-testo"]
-        };
-        var tl = typeLabels[data.pdf_type] ? typeLabels[data.pdf_type][0] : "sconosciuto";
-        var tc = typeLabels[data.pdf_type] ? typeLabels[data.pdf_type][1] : "badge-testo";
-        var pagesLabel = data.pages_processed
-          ? data.pages_processed + " di " + data.total_pages + " pagine elaborate"
-          : data.page_count + " pagine";
-        showStatus(
-          "Conversione completata - motore: <b>" + data.engine + "</b> " +
-          "<span class=\"badge " + tc + "\">" + tl + "</span> - " + pagesLabel,
-          "ok"
-        );
-        var html = "";
-        if (data.download_markdown) html += "<a href=\"" + data.download_markdown + "\" download>Scarica Markdown</a>";
-        if (data.download_json)     html += "<a href=\"" + data.download_json + "\" download>Scarica JSON</a>";
-        if (data.download_docx)     html += "<a href=\"" + data.download_docx + "\" download>Scarica DOCX</a>";
-        resultLinks.innerHTML = html;
+      .then(function(r) {
+        if (!r.ok) { stopTm(false); showSt("Errore: " + (r.data.detail || "problema sconosciuto"), "error"); return; }
+        stopTm(true);
+        var d = r.data;
+        var tl = { TESTO: ["testo","bt"], SCANSIONE: ["scansione","bs"], VETT_RASTER: ["vett-raster","bv"], MISTO: ["misto","bt"] };
+        var tp = tl[d.pdf_type] || ["sconosciuto","bt"];
+        var pl = d.pages_processed ? d.pages_processed + " di " + d.total_pages + " pag." : d.page_count + " pag.";
+        showSt("Conversione completata - motore: <b>" + d.engine + "</b> <span class='badge " + tp[1] + "'>" + tp[0] + "</span> - " + pl, "ok");
+        var h = "";
+        if (d.download_markdown) h += '<a href="' + d.download_markdown + '" download>Scarica Markdown</a>';
+        if (d.download_json)     h += '<a href="' + d.download_json + '" download>Scarica JSON</a>';
+        if (d.download_docx)     h += '<a href="' + d.download_docx + '" download>Scarica DOCX</a>';
+        lk.innerHTML = h;
       })
       .catch(function(err) {
-        stopTimer(false);
-        clearTimeout(timeout);
+        stopTm(false);
+        clearTimeout(tmo);
         if (err.name === "AbortError") {
-          showStatus("Timeout: oltre 8 minuti. Riprova con meno pagine.", "error");
+          showSt("Timeout: oltre 8 minuti. Riprova con meno pagine.", "error");
         } else {
-          showStatus("Errore di rete: " + err.message, "error");
+          showSt("Errore di rete: " + err.message, "error");
         }
       })
       .finally(function() {
@@ -301,14 +260,13 @@ _HTML = """<!DOCTYPE html>
 </html>"""
 
 
+_last_cleanup = 0.0
+_cleanup_lock = asyncio.Lock()
 
-# ---------------------------------------------------------------------------
-# Helper: estrae un sottoinsieme di pagine come PDF temporaneo
-# ---------------------------------------------------------------------------
-def _extract_page_range(pdf_path: Path, page_from: int, page_to: int, pymupdf_extract_fn) -> object:
-    """Crea un PDF temporaneo con solo le pagine richieste e lo estrae con pymupdf."""
+
+def _extract_page_range(pdf_path: Path, page_from: int, page_to: int, extract_fn):
     if page_from > page_to:
-        raise ValueError(f"Range pagine non valido: {page_from} > {page_to}")
+        raise ValueError(f"Range non valido: {page_from} > {page_to}")
     temp_pdf = pdf_path.parent / f"range_{uuid.uuid4().hex[:8]}.pdf"
     try:
         with fitz.open(str(pdf_path)) as src:
@@ -316,19 +274,14 @@ def _extract_page_range(pdf_path: Path, page_from: int, page_to: int, pymupdf_ex
                 for pn in range(page_from - 1, page_to):
                     dst.insert_pdf(src, from_page=pn, to_page=pn)
                 dst.save(str(temp_pdf))
-        result = pymupdf_extract_fn(temp_pdf)
+        result = extract_fn(temp_pdf)
         if not getattr(result, "page_count", 0):
             result.page_count = page_to - page_from + 1
         return result
     finally:
-        temp_pdf.unlink(missing_ok=True)
+        if temp_pdf.exists():
+            temp_pdf.unlink()
 
-
-# ---------------------------------------------------------------------------
-# Pulizia directory vecchie (max una scansione ogni 60 sec)
-# ---------------------------------------------------------------------------
-_last_cleanup = 0.0
-_cleanup_lock = asyncio.Lock()
 
 async def _cleanup_old_dirs():
     global _last_cleanup
@@ -337,7 +290,6 @@ async def _cleanup_old_dirs():
         if now - _last_cleanup < 60:
             return
         _last_cleanup = now
-    # Operazioni I/O fuori dal lock per non bloccare altri task
     try:
         dirs = list(TEMP_DIR.iterdir())
     except Exception:
@@ -346,14 +298,11 @@ async def _cleanup_old_dirs():
         if d.is_dir() and (time.time() - d.stat().st_mtime) > 3600:
             try:
                 await asyncio.to_thread(shutil.rmtree, d)
-                logger.info("Rimossa directory temporanea: %s", d.name)
+                logger.info("Rimossa dir: %s", d.name)
             except Exception:
                 pass
 
 
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def root():
     return HTMLResponse(content=_HTML, media_type="text/html; charset=utf-8")
@@ -361,7 +310,7 @@ async def root():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "2.2"}
+    return {"status": "ok", "version": "3.0"}
 
 
 @app.post("/convert")
@@ -372,7 +321,6 @@ async def convert(
     page_from: int = Form(1),
     page_to: int = Form(0),
 ):
-    # Validazione input
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Il file deve essere un PDF (.pdf)")
     if output not in ("all", "markdown", "json", "docx"):
@@ -382,7 +330,6 @@ async def convert(
     req_dir = TEMP_DIR / req_id
     req_dir.mkdir(parents=True, exist_ok=True)
 
-    # Streaming su disco con limite dimensione
     pdf_path = req_dir / "input.pdf"
     file_size = 0
     try:
@@ -399,14 +346,13 @@ async def convert(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Errore salvataggio file: {exc}")
+        raise HTTPException(status_code=500, detail=f"Errore salvataggio: {exc}")
     finally:
         await file.close()
 
-    # Conta pagine reali e valida intervallo
     try:
-        with fitz.open(str(pdf_path)) as _doc:
-            total_pages = _doc.page_count
+        with fitz.open(str(pdf_path)) as doc:
+            total_pages = doc.page_count
         if total_pages == 0:
             raise HTTPException(status_code=400, detail="Il PDF non contiene pagine")
     except HTTPException:
@@ -420,13 +366,12 @@ async def convert(
     if page_from > total_pages:
         page_from = total_pages
     if page_from > page_to:
-        page_to = page_from  # garantisce almeno 1 pagina
+        page_to = page_from
 
     from src.pdf_detector import detect, PdfType
     pdf_type = detect(pdf_path)
     logger.info("Tipo PDF: %s - req %s", pdf_type, req_id)
 
-    # Importazioni robuste
     try:
         from src.extractor_pymupdf import extract as pymupdf_extract, ExtractionResult, Element, BBox
     except ImportError as exc:
@@ -437,7 +382,6 @@ async def convert(
     except ImportError as exc:
         raise HTTPException(status_code=500, detail=f"Modulo extractor_ocr mancante: {exc}")
 
-    # Estrazione con gestione errori completa e timeout
     extraction = None
     try:
         if pdf_type in (PdfType.TESTO, PdfType.MISTO):
@@ -489,7 +433,7 @@ async def convert(
                             md_lines.append("---\n")
                     extraction.markdown = "\n".join(md_lines).strip()
             except Exception as exc:
-                logger.exception("SsnCertExtractor fallito - uso fallback vett_raster")
+                logger.exception("SsnCertExtractor fallito - uso fallback")
                 extraction = None
 
             if extraction is None:
@@ -509,7 +453,6 @@ async def convert(
                     extraction.pdf_type = pdf_type.value
 
         else:
-            # SCANSIONE - OCR con intervallo pagine e timeout
             _from = max(0, page_from - 1)
             _to = page_to
             try:
@@ -518,7 +461,7 @@ async def convert(
                     timeout=OCR_TIMEOUT
                 )
             except asyncio.TimeoutError:
-                raise HTTPException(status_code=504, detail=f"OCR troppo lento (oltre {int(OCR_TIMEOUT)} secondi). Riduci il numero di pagine.")
+                raise HTTPException(status_code=504, detail=f"OCR troppo lento (oltre {int(OCR_TIMEOUT)}s). Riduci il numero di pagine.")
             extraction.pdf_type = pdf_type.value
 
     except HTTPException:
@@ -534,16 +477,14 @@ async def convert(
         )
         extraction.pdf_type = pdf_type.value
 
-    # Normalizza attributi
-    page_count = getattr(extraction, "page_count", 0) or 1
+    page_count = getattr(extraction, "page_count", 0) or (page_to - page_from + 1)
     extraction.page_count = page_count
     error = getattr(extraction, "error", None)
     engine = getattr(extraction, "engine", "sconosciuto")
+    pages_processed = getattr(extraction, "page_count", 0)
 
     if error:
         logger.warning("Estrazione con errore: %s", error)
-
-    pages_processed = getattr(extraction, "page_count", 0) or (page_to - page_from + 1)
 
     response: dict = {
         "pdf_type": pdf_type.value,
@@ -562,28 +503,20 @@ async def convert(
 
     if output in ("all", "json"):
         elements = []
-        if hasattr(extraction, "elements"):
-            for e in (extraction.elements or []):
-                if hasattr(e, "to_dict"):
-                    elements.append(e.to_dict())
-                elif hasattr(e, "__dict__"):
-                    elements.append(e.__dict__)
-                else:
-                    elements.append(e)
-        elif hasattr(extraction, "to_dict"):
-            elements = extraction.to_dict().get("elements") or []
+        for e in getattr(extraction, "elements", []) or []:
+            if hasattr(e, "to_dict"):
+                elements.append(e.to_dict())
+            elif hasattr(e, "__dict__"):
+                elements.append(e.__dict__)
+            else:
+                elements.append(e)
         json_path = req_dir / "output.json"
         payload = {
-            "pdf_type": pdf_type.value,
-            "engine": engine,
-            "page_count": page_count,
-            "filename": file.filename,
+            "pdf_type": pdf_type.value, "engine": engine,
+            "page_count": page_count, "filename": file.filename,
             "elements": elements,
         }
-        json_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2, default=str),
-            encoding="utf-8"
-        )
+        json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
         response["download_json"] = f"/download/{req_id}/output.json"
 
     if output in ("all", "docx"):
@@ -597,7 +530,6 @@ async def convert(
             logger.warning("DOCX non generato: %s", exc)
 
     background_tasks.add_task(_cleanup_old_dirs)
-
     return JSONResponse(response)
 
 
@@ -607,17 +539,14 @@ async def download(req_id: str, filename: str):
     safe_file = Path(filename).name
     if not safe_req or not safe_file:
         raise HTTPException(status_code=400, detail="Percorso non valido")
-
     file_path = (TEMP_DIR / safe_req / safe_file).resolve()
     if not str(file_path).startswith(str(TEMP_DIR.resolve())):
         raise HTTPException(status_code=400, detail="Percorso non valido")
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File non trovato o scaduto")
-
     media_types = {
         ".md": "text/markdown",
         ".json": "application/json",
         ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     }
-    media_type = media_types.get(file_path.suffix, "application/octet-stream")
-    return FileResponse(str(file_path), media_type=media_type, filename=safe_file)
+    return FileResponse(str(file_path), media_type=media_types.get(file_path.suffix, "application/octet-stream"), filename=safe_file)
